@@ -28,6 +28,9 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.FileChannel.MapMode;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 
 /**
@@ -68,6 +71,12 @@ public class HostMemoryBuffer extends MemoryBuffer {
       long origAddress = address;
       if (address != 0) {
         try {
+          HostMemoryBuffer.totalAllocated1.addAndGet(-length);
+          if(HostMemoryBuffer.allocByThread.containsKey(Thread.currentThread().getId())) {
+            HostMemoryBuffer.allocByThread.get(Thread.currentThread().getId()).addAndGet(-length);
+          } else {
+            log.error("Thread " + Thread.currentThread().getId() + " does not have an allocation record");
+          }
           UnsafeMemoryAccessor.free(address);
         } finally {
           // Always mark the resource as freed even if an exception is thrown.
@@ -141,8 +150,22 @@ public class HostMemoryBuffer extends MemoryBuffer {
         return pinnedBuffer;
       }
     }
+    totalAllocated1.addAndGet(bytes);
+    double gb = totalAllocated1.get()/1024.0/1024/1024;
+    if(gb > lastPrinted1 + 1) {
+      lastPrinted1 = gb;
+      log.error("totalAllocated in site 1 reach: " + gb + "GB");
+    }
+
+    allocByThread.computeIfAbsent(Thread.currentThread().getId(), k -> new AtomicLong(0));
+    allocByThread.get(Thread.currentThread().getId()).addAndGet(bytes);
+
     return new HostMemoryBuffer(UnsafeMemoryAccessor.allocate(bytes), bytes);
   }
+
+  public static AtomicLong totalAllocated1 = new AtomicLong(0);
+  public static double lastPrinted1 = 0;
+  public static Map<Long, AtomicLong> allocByThread = new HashMap<>();
 
   /**
    * Allocate memory, but be sure to close the returned buffer to avoid memory leaks. Pinned memory
@@ -162,6 +185,16 @@ public class HostMemoryBuffer extends MemoryBuffer {
    * @return the newly created buffer
    */
   public static HostMemoryBuffer allocateRaw(long bytes) {
+    totalAllocated1.addAndGet(bytes);
+    double gb = totalAllocated1.get()/1024.0/1024/1024;
+    if(gb > lastPrinted1 + 1) {
+      lastPrinted1 = gb;
+      log.error("totalAllocated in site 2 reach: " + gb + "GB");
+    }
+
+    allocByThread.computeIfAbsent(Thread.currentThread().getId(), k -> new AtomicLong(0));
+    allocByThread.get(Thread.currentThread().getId()).addAndGet(bytes);
+
     return new HostMemoryBuffer(UnsafeMemoryAccessor.allocate(bytes), bytes);
   }
 
