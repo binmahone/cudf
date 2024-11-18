@@ -28,6 +28,7 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.FileChannel.MapMode;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
@@ -75,7 +76,8 @@ public class HostMemoryBuffer extends MemoryBuffer {
           if(HostMemoryBuffer.allocByThread.containsKey(Thread.currentThread().getId())) {
             HostMemoryBuffer.allocByThread.get(Thread.currentThread().getId()).addAndGet(-length);
           } else {
-            log.error("Thread " + Thread.currentThread().getId() + " does not have an allocation record");
+            log.error("Thread " + Thread.currentThread().getId() + " does not have an allocation record, thread name:" + Thread.currentThread().getName());
+            log.error("ST: " + Arrays.toString(Thread.currentThread().getStackTrace()).replace( ',', '\n' ));
           }
           UnsafeMemoryAccessor.free(address);
         } finally {
@@ -152,13 +154,16 @@ public class HostMemoryBuffer extends MemoryBuffer {
     }
     totalAllocated1.addAndGet(bytes);
     double gb = totalAllocated1.get()/1024.0/1024/1024;
-    if(gb > lastPrinted1 + 1) {
+    if(gb > lastPrinted1 + 1 || gb < lastPrinted1 - 1) {
       lastPrinted1 = gb;
-      log.error("totalAllocated in site 1 reach: " + gb + "GB");
+      log.error("totalAllocated in site 1 reach: " + gb + "GB, thread name:" + Thread.currentThread().getName());
+      log.error("ST: " + Arrays.toString(Thread.currentThread().getStackTrace()).replace( ',', '\n' ));
     }
 
     allocByThread.computeIfAbsent(Thread.currentThread().getId(), k -> new AtomicLong(0));
     allocByThread.get(Thread.currentThread().getId()).addAndGet(bytes);
+
+
 
     return new HostMemoryBuffer(UnsafeMemoryAccessor.allocate(bytes), bytes);
   }
@@ -187,9 +192,10 @@ public class HostMemoryBuffer extends MemoryBuffer {
   public static HostMemoryBuffer allocateRaw(long bytes) {
     totalAllocated1.addAndGet(bytes);
     double gb = totalAllocated1.get()/1024.0/1024/1024;
-    if(gb > lastPrinted1 + 1) {
+    if(gb > lastPrinted1 + 1 || gb < lastPrinted1 - 1) {
       lastPrinted1 = gb;
-      log.error("totalAllocated in site 2 reach: " + gb + "GB");
+      log.error("totalAllocated in site 2 reach: " + gb + "GB, thread name:" + Thread.currentThread().getName());
+      log.error("ST: " + Arrays.toString(Thread.currentThread().getStackTrace()).replace( ',', '\n' ));
     }
 
     allocByThread.computeIfAbsent(Thread.currentThread().getId(), k -> new AtomicLong(0));
