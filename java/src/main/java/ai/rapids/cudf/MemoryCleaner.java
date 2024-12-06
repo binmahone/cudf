@@ -105,7 +105,8 @@ public final class MemoryCleaner {
         synchronized (this) {
           StringBuilder sb = new StringBuilder();
           for (int i = 0; i < refCountDebug.size(); i++) {
-            sb.append("(").append(i).append("/").append(refCountDebug.size()).append(")\n").append(refCountDebug.get(i));
+            sb.append("(").append(i).append("/").append(refCountDebug.size()).append(")(ID:").
+                append(id).append(")\n").append(refCountDebug.get(i));
           }
           log.error("{} (ID: {}): \n {}", message, id, sb);
         }
