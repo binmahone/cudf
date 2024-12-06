@@ -102,8 +102,12 @@ public final class MemoryCleaner {
 
     public final void logRefCountDebug(String message) {
       if (REF_COUNT_DEBUG && refCountDebug != null) {
-        synchronized(this) {
-          log.error("{} (ID: {}): {}", message, id, MemoryCleaner.stringJoin("\n", refCountDebug));
+        synchronized (this) {
+          StringBuilder sb = new StringBuilder();
+          for (int i = 0; i < refCountDebug.size(); i++) {
+            sb.append("(").append(i).append("/").append(refCountDebug.size()).append(")\n").append(refCountDebug.get(i));
+          }
+          log.error("{} (ID: {}): \n {}", message, id, sb);
         }
       }
     }

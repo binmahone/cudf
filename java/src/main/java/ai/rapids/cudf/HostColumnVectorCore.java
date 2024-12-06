@@ -44,6 +44,10 @@ public class HostColumnVectorCore implements AutoCloseable {
   protected List<HostColumnVectorCore> children;
 
 
+  public MemoryCleaner.Cleaner getCleaner() {
+    return offHeap;
+  }
+
   public HostColumnVectorCore(DType type, long rows,
                               Optional<Long> nullCount, HostMemoryBuffer data, HostMemoryBuffer validity,
                               HostMemoryBuffer offsets, List<HostColumnVectorCore> nestedChildren) {
