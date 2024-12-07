@@ -534,6 +534,7 @@ public class HostColumnVectorCore implements AutoCloseable {
         child.close();
       }
     }
+    log.error("closing HostColumnVectorCore with id: " + getCleaner().id);
     offHeap.delRef();
     offHeap.cleanImpl(false);
   }
