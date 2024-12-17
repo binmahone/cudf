@@ -438,6 +438,10 @@ public class Rmm {
 
   public static native void cleanupDefaultCudaDevice();
 
+  public static native void startMemoryProfiling();
+
+  public static native void dumpHeapProfile(String filename);
+
   /**
    * Shut down any initialized RMM instance.  This should be used very rarely.  It does not need to
    * be used when shutting down your process because CUDA will handle releasing all of the

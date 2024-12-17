@@ -38,6 +38,8 @@
 #include <limits>
 #include <mutex>
 
+#include "/home/hongbin/develop/jemalloc-5.3.0/include/jemalloc/jemalloc.h"
+
 using rmm::mr::device_memory_resource;
 using rmm::mr::logging_resource_adaptor;
 using rmm_pinned_pool_t = rmm::mr::pool_memory_resource<rmm::mr::pinned_host_memory_resource>;
@@ -590,6 +592,70 @@ std::unique_ptr<pinned_fallback_host_memory_resource> pinned_fallback_mr;
 }  // anonymous namespace
 
 extern "C" {
+
+JNIEXPORT void JNICALL Java_JemallocExample_getJemallocStats(JNIEnv *env, jobject obj) {
+    size_t allocated_size;
+    size_t active_size;
+    size_t retained_size;
+
+    // Get the allocated size
+    size_t sz = sizeof(allocated_size);
+    mallctl("stats.allocated", &allocated_size, &sz, NULL, 0);
+
+    // Get the active size
+    sz = sizeof(active_size);
+    mallctl("stats.active", &active_size, &sz, NULL, 0);
+
+    // Get the retained size
+    sz = sizeof(retained_size);
+    mallctl("stats.retained", &retained_size, &sz, NULL, 0);
+
+    // Print the stats
+    printf("Allocated size: %zu bytes\n", allocated_size);
+    printf("Active size: %zu bytes\n", active_size);
+    printf("Retained size: %zu bytes\n", retained_size);
+}
+
+
+JNIEXPORT void JNICALL Java_ai_rapids_cudf_Rmm_startMemoryProfiling(JNIEnv* env, jclass clazz) {
+    bool active = true;
+    mallctl("prof.active", NULL, NULL, &active, sizeof(bool));
+}
+
+
+JNIEXPORT void JNICALL
+Java_ai_rapids_cudf_Rmm_dumpHeapProfile(JNIEnv *env, jclass clazz, jstring filename) {
+    // Convert the jstring to a C string
+    const char *nativeString = (env)->GetStringUTFChars(filename, 0);
+
+    mallctl("prof.dump", NULL, NULL, &nativeString, sizeof(const char *));
+
+    // Release the memory allocated for the C string
+    (env)->ReleaseStringUTFChars(filename, nativeString);
+}
+
+JNIEXPORT void JNICALL Java_ai_rapids_cudf_Rmm_printMemoryStats(JNIEnv* env, jclass clazz) {
+    size_t allocated_size;
+    size_t active_size;
+    size_t retained_size;
+
+    // Get the allocated size
+    size_t sz = sizeof(allocated_size);
+    mallctl("stats.allocated", &allocated_size, &sz, NULL, 0);
+
+    // Get the active size
+    sz = sizeof(active_size);
+    mallctl("stats.active", &active_size, &sz, NULL, 0);
+
+    // Get the retained size
+    sz = sizeof(retained_size);
+    mallctl("stats.retained", &retained_size, &sz, NULL, 0);
+
+    // Print the stats
+    printf("Allocated size: %zu bytes\n", allocated_size);
+    printf("Active size: %zu bytes\n", active_size);
+    printf("Retained size: %zu bytes\n", retained_size);
+}
 
 JNIEXPORT void JNICALL Java_ai_rapids_cudf_Rmm_initDefaultCudaDevice(JNIEnv* env, jclass clazz)
 {

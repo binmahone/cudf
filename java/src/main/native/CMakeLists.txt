@@ -87,7 +87,7 @@ endif()
 # ##################################################################################################
 # * build type ------------------------------------------------------------------------------------
 #   Set a default build type if none was specified
-rapids_cmake_build_type("Release")
+rapids_cmake_build_type("Debug")
 
 # ##################################################################################################
 # * CUDF ------------------------------------------------------------------------------------------
@@ -169,6 +169,9 @@ if(CUDF_JNI_ENABLE_PROFILING)
   target_compile_definitions(cudfjni PRIVATE CUDF_JNI_ENABLE_PROFILING)
 endif()
 
+
+
+
 if(CUDF_JNI_LIBCUDF_STATIC AND BUILD_SHARED_LIBS)
   # When linking against libcudf.a, the JNI library will include the old libcudf.so. For
   # backwards-compatibility for software that expects to find libcudf.so in the JVM environment
@@ -220,7 +223,7 @@ target_link_options(cudfjni PRIVATE "-Wl,--no-undefined")
 
 set(CUDF_ENABLE_ARROW_PARQUET ON)
 include(../../../../cpp/cmake/thirdparty/get_arrow.cmake)
-target_link_libraries(cudfjni PRIVATE ${ARROW_LIBRARIES})
+target_link_libraries(cudfjni PRIVATE ${ARROW_LIBRARIES}  /home/hongbin/develop/jemalloc-5.3.0/lib/libjemalloc.so.2)
 
 if(USE_GDS)
   add_library(cufilejni src/CuFileJni.cpp)
