@@ -54,10 +54,11 @@ abstract public class MemoryBuffer implements AutoCloseable {
   protected final long id;
 
   private EventHandler eventHandler;
+  private EventHandler eventHandler2;
 
   public static abstract class MemoryBufferCleaner extends MemoryCleaner.Cleaner{}
 
-  private static final class SlicedBufferCleaner extends MemoryBufferCleaner {
+  static final class SlicedBufferCleaner extends MemoryBufferCleaner {
     private MemoryBuffer parent;
 
     SlicedBufferCleaner(MemoryBuffer parent) {
@@ -233,6 +234,22 @@ abstract public class MemoryBuffer implements AutoCloseable {
     return this.eventHandler;
   }
 
+
+  public synchronized EventHandler setEventHandler2(EventHandler newHandler) {
+    EventHandler prev = this.eventHandler2;
+    this.eventHandler2 = newHandler;
+    return prev;
+  }
+
+  /**
+   * Returns the current event handler for this buffer or null if no handler
+   * is associated or this buffer is closed.
+   */
+  public synchronized EventHandler getEventHandler2() {
+    return this.eventHandler2;
+  }
+
+
   /**
    * Close this buffer and free memory
    */
@@ -251,6 +268,9 @@ abstract public class MemoryBuffer implements AutoCloseable {
       } finally {
         if (eventHandler != null) {
           eventHandler.onClosed(refCount);
+        }
+        if (eventHandler2!= null) {
+          eventHandler2.onClosed(refCount);
         }
       }
     }
