@@ -252,20 +252,30 @@ public class HostMemoryBuffer extends MemoryBuffer {
    * @throws EOFException If there are not enough bytes in the stream to copy.
    * @throws IOException If there is an error reading from the stream.
    */
-  public final void copyFromStream(long destOffset, InputStream in, long byteLength) throws IOException {
+  public final long[] copyFromStream(long destOffset, InputStream in, long byteLength) throws IOException {
+    long a =0L;
+    long b =0L;
+    long c =0L;
     addressOutOfBoundsCheck(address + destOffset, byteLength, "copy from stream");
+    long bStart = System.nanoTime();
     byte[] arrayBuffer = new byte[(int) Math.min(1024 * 128, byteLength)];
+    b += (System.nanoTime() - bStart);
     long left = byteLength;
     while (left > 0) {
       int amountToCopy = (int) Math.min(arrayBuffer.length, left);
+      long aStart = System.nanoTime();
       int amountRead = in.read(arrayBuffer, 0, amountToCopy);
+      a += (System.nanoTime() - aStart);
       if (amountRead < 0) {
         throw new EOFException("Unexpected end of stream, expected " + left + " more bytes");
       }
+      long cStart = System.nanoTime();
       setBytes(destOffset, arrayBuffer, 0, amountRead);
+      c += (System.nanoTime() - cStart);
       destOffset += amountRead;
       left -= amountRead;
     }
+    return new long[] {a, b, c};
   }
 
   /**
