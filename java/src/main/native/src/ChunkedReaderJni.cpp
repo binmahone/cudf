@@ -33,7 +33,8 @@ Java_ai_rapids_cudf_ParquetChunkedReader_create(JNIEnv* env,
                                                 jbooleanArray j_col_binary_read,
                                                 jstring inp_file_path,
                                                 jlongArray addrs_sizes,
-                                                jint unit)
+                                                jint unit,
+                                                jintArray row_group_indices)
 {
   JNI_NULL_CHECK(env, j_col_binary_read, "Null col_binary_read", nullptr);
   bool read_buffer = true;
@@ -77,6 +78,18 @@ Java_ai_rapids_cudf_ParquetChunkedReader_create(JNIEnv* env,
     auto opts_builder = cudf::io::parquet_reader_options::builder(source);
     if (n_filter_col_names.size() > 0) {
       opts_builder = opts_builder.column_names(n_filter_col_names.as_cpp_vector());
+    }
+    // Optional host-side row-group filter. If the caller supplies a non-null
+    // array, apply it so cuDF reads only those row groups (single source).
+    // Maps to cudf::io::parquet_reader_options::set_row_groups({{ ... }}).
+    if (row_group_indices != nullptr) {
+      cudf::jni::native_jintArray n_row_groups(env, row_group_indices);
+      std::vector<cudf::size_type> per_source_rgs;
+      per_source_rgs.reserve(n_row_groups.size());
+      for (int i = 0; i < n_row_groups.size(); ++i) {
+        per_source_rgs.push_back(static_cast<cudf::size_type>(n_row_groups[i]));
+      }
+      opts_builder = opts_builder.row_groups({per_source_rgs});
     }
     auto const read_opts = opts_builder.convert_strings_to_categories(false)
                              .timestamp_type(cudf::data_type(static_cast<cudf::type_id>(unit)))

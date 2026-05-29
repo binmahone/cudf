@@ -20,6 +20,7 @@ public class ParquetOptions extends ColumnFilterOptions {
 
   private final DType unit;
   private final boolean[] readBinaryAsString;
+  private final int[] rowGroupIndices;
 
   private ParquetOptions(Builder builder) {
     super(builder);
@@ -28,6 +29,7 @@ public class ParquetOptions extends ColumnFilterOptions {
     for (int i = 0 ; i < builder.binaryAsStringColumns.size() ; i++) {
       readBinaryAsString[i] = builder.binaryAsStringColumns.get(i);
     }
+    rowGroupIndices = builder.rowGroupIndices;
   }
 
   DType timeUnit() {
@@ -38,6 +40,20 @@ public class ParquetOptions extends ColumnFilterOptions {
     return readBinaryAsString;
   }
 
+  /**
+   * Indices of row groups to read for the (single-source) parquet input.
+   * Returns null if no row group filter is set; in that case the reader
+   * reads every row group in the file.
+   *
+   * Maps to cudf::io::parquet_reader_options::set_row_groups() for the
+   * first (and only) source. Lets callers pre-filter row groups on host
+   * (e.g. via the Spark file split byte range) instead of letting cuDF
+   * read all row groups.
+   */
+  public int[] getRowGroupIndices() {
+    return rowGroupIndices;
+  }
+
   public static ParquetOptions.Builder builder() {
     return new Builder();
   }
@@ -45,6 +61,7 @@ public class ParquetOptions extends ColumnFilterOptions {
   public static class Builder extends ColumnFilterOptions.Builder<Builder> {
     private DType unit = DType.EMPTY;
     final List<Boolean> binaryAsStringColumns = new ArrayList<>();
+    int[] rowGroupIndices = null;
 
     /**
      * Specify the time unit to use when returning timestamps.
@@ -54,6 +71,23 @@ public class ParquetOptions extends ColumnFilterOptions {
     public Builder withTimeUnit(DType unit) {
       assert unit.isTimestampType();
       this.unit = unit;
+      return this;
+    }
+
+    /**
+     * Restrict the read to the given row-group indices (for the single
+     * parquet source). Passing null (the default) reads every row group.
+     *
+     * Maps to cudf::io::parquet_reader_options::set_row_groups() with a
+     * single-source vector. Indices are 0-based and must be in ascending
+     * order within the file's row-group list; cuDF will throw if any
+     * index is out of range.
+     *
+     * @param indices row-group indices to read, or null for no filter.
+     * @return builder for chaining
+     */
+    public Builder withRowGroups(int[] indices) {
+      this.rowGroupIndices = indices;
       return this;
     }
 
