@@ -7,6 +7,8 @@
 
 package ai.rapids.cudf;
 
+import ai.rapids.cudf.ast.CompiledExpression;
+
 import java.io.File;
 
 /**
@@ -51,9 +53,10 @@ public class ParquetChunkedReader implements AutoCloseable {
    * @param filePath Full path of the input Parquet file to read.
    */
   public ParquetChunkedReader(long chunkSizeByteLimit, long passReadLimit, ParquetOptions opts, File filePath) {
+    filter = opts.getFilter();
     long[] handles = create(chunkSizeByteLimit, passReadLimit, opts.getIncludeColumnNames(), opts.getReadBinaryAsString(),
         filePath.getAbsolutePath(), null, opts.timeUnit().typeId.getNativeId(),
-        opts.getRowGroupIndices());
+        opts.getRowGroupIndices(), getFilterHandle(filter));
     handle = handles[0];
     if (handle == 0) {
       throw new IllegalStateException("Cannot create native chunked Parquet reader object.");
@@ -91,9 +94,11 @@ public class ParquetChunkedReader implements AutoCloseable {
   public ParquetChunkedReader(long chunkSizeByteLimit, long passReadLimit,
                               ParquetOptions opts, HostMemoryBuffer buffer,
                               long offset, long len) {
+    filter = opts.getFilter();
     long[] addrsSizes = new long[]{ buffer.getAddress() + offset, len };
     long[] handles = create(chunkSizeByteLimit,passReadLimit,  opts.getIncludeColumnNames(), opts.getReadBinaryAsString(), null,
-        addrsSizes, opts.timeUnit().typeId.getNativeId(), opts.getRowGroupIndices());
+        addrsSizes, opts.timeUnit().typeId.getNativeId(), opts.getRowGroupIndices(),
+        getFilterHandle(filter));
     handle = handles[0];
     if (handle == 0) {
       throw new IllegalStateException("Cannot create native chunked Parquet reader object.");
@@ -114,13 +119,15 @@ public class ParquetChunkedReader implements AutoCloseable {
    */
   public ParquetChunkedReader(long chunkSizeByteLimit, long passReadLimit,
                               ParquetOptions opts, HostMemoryBuffer... buffers) {
+    filter = opts.getFilter();
     long[] addrsSizes = new long[buffers.length * 2];
     for (int i = 0; i < buffers.length; i++) {
       addrsSizes[i * 2] = buffers[i].getAddress();
       addrsSizes[(i * 2) + 1] = buffers[i].getLength();
     }
     long[] handles = create(chunkSizeByteLimit,passReadLimit,  opts.getIncludeColumnNames(), opts.getReadBinaryAsString(), null,
-        addrsSizes, opts.timeUnit().typeId.getNativeId(), opts.getRowGroupIndices());
+        addrsSizes, opts.timeUnit().typeId.getNativeId(), opts.getRowGroupIndices(),
+        getFilterHandle(filter));
     handle = handles[0];
     if (handle == 0) {
       throw new IllegalStateException("Cannot create native chunked Parquet reader object.");
@@ -136,6 +143,7 @@ public class ParquetChunkedReader implements AutoCloseable {
    * @param ds the data source to read from
    */
   public ParquetChunkedReader(long chunkSizeByteLimit, ParquetOptions opts, DataSource ds) {
+    filter = opts.getFilter();
     dataSourceHandle = DataSourceHelper.createWrapperDataSource(ds);
     if (dataSourceHandle == 0) {
       throw new IllegalStateException("Cannot create native datasource object");
@@ -145,7 +153,7 @@ public class ParquetChunkedReader implements AutoCloseable {
     try {
       handle = createWithDataSource(chunkSizeByteLimit, opts.getIncludeColumnNames(),
               opts.getReadBinaryAsString(), opts.timeUnit().typeId.getNativeId(),
-              dataSourceHandle);
+              dataSourceHandle, getFilterHandle(filter));
       passed = true;
     } finally {
       if (!passed) {
@@ -222,6 +230,13 @@ public class ParquetChunkedReader implements AutoCloseable {
 
   private long multiHostBufferSourceHandle = 0;
 
+  // Retain the compiled expression for at least as long as the native reader uses it.
+  private final CompiledExpression filter;
+
+  private static long getFilterHandle(CompiledExpression filter) {
+    return filter == null ? 0 : filter.getNativeHandle();
+  }
+
   /**
    * Create a native chunked Parquet reader object on heap and return its memory address.
    *
@@ -238,10 +253,11 @@ public class ParquetChunkedReader implements AutoCloseable {
   private static native long[] create(long chunkSizeByteLimit, long passReadLimit,
                                       String[] filterColumnNames, boolean[] binaryToString,
                                       String filePath, long[] bufferAddrsSizes, int timeUnit,
-                                      int[] rowGroupIndices);
+                                      int[] rowGroupIndices, long filterHandle);
 
   private static native long createWithDataSource(long chunkedSizeByteLimit,
-      String[] filterColumnNames, boolean[] binaryToString, int timeUnit, long dataSourceHandle);
+      String[] filterColumnNames, boolean[] binaryToString, int timeUnit, long dataSourceHandle,
+      long filterHandle);
 
   private static native boolean hasNext(long handle);
 

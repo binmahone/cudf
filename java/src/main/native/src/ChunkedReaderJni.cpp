@@ -4,6 +4,7 @@
  */
 
 #include "cudf_jni_apis.hpp"
+#include "jni_compiled_expr.hpp"
 #include "jni_utils.hpp"
 #include "multi_host_buffer_source.hpp"
 
@@ -34,7 +35,8 @@ Java_ai_rapids_cudf_ParquetChunkedReader_create(JNIEnv* env,
                                                 jstring inp_file_path,
                                                 jlongArray addrs_sizes,
                                                 jint unit,
-                                                jintArray row_group_indices)
+                                                jintArray row_group_indices,
+                                                jlong filter_handle)
 {
   JNI_NULL_CHECK(env, j_col_binary_read, "Null col_binary_read", nullptr);
   bool read_buffer = true;
@@ -88,6 +90,11 @@ Java_ai_rapids_cudf_ParquetChunkedReader_create(JNIEnv* env,
       }
       opts_builder = opts_builder.row_groups({selected_row_groups});
     }
+    if (filter_handle != 0) {
+      auto const compiled_filter =
+        reinterpret_cast<cudf::jni::ast::compiled_expr const*>(filter_handle);
+      opts_builder = opts_builder.filter(compiled_filter->get_top_expression());
+    }
     auto const read_opts = opts_builder.convert_strings_to_categories(false)
                              .timestamp_type(cudf::data_type(static_cast<cudf::type_id>(unit)))
                              // Ignore any missing projected column(s) by default
@@ -114,7 +121,8 @@ Java_ai_rapids_cudf_ParquetChunkedReader_createWithDataSource(JNIEnv* env,
                                                               jobjectArray filter_col_names,
                                                               jbooleanArray j_col_binary_read,
                                                               jint unit,
-                                                              jlong ds_handle)
+                                                              jlong ds_handle,
+                                                              jlong filter_handle)
 {
   JNI_NULL_CHECK(env, j_col_binary_read, "Null col_binary_read", 0);
   JNI_NULL_CHECK(env, ds_handle, "Null DataSouurce", 0);
@@ -137,6 +145,11 @@ Java_ai_rapids_cudf_ParquetChunkedReader_createWithDataSource(JNIEnv* env,
     auto opts_builder = cudf::io::parquet_reader_options::builder(source);
     if (n_filter_col_names.size() > 0) {
       opts_builder = opts_builder.column_names(n_filter_col_names.as_cpp_vector());
+    }
+    if (filter_handle != 0) {
+      auto const compiled_filter =
+        reinterpret_cast<cudf::jni::ast::compiled_expr const*>(filter_handle);
+      opts_builder = opts_builder.filter(compiled_filter->get_top_expression());
     }
     auto const read_opts = opts_builder.convert_strings_to_categories(false)
                              .timestamp_type(cudf::data_type(static_cast<cudf::type_id>(unit)))

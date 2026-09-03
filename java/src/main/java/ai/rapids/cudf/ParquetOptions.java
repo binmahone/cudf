@@ -7,6 +7,8 @@
 
 package ai.rapids.cudf;
 
+import ai.rapids.cudf.ast.CompiledExpression;
+
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -21,6 +23,7 @@ public class ParquetOptions extends ColumnFilterOptions {
   private final DType unit;
   private final boolean[] readBinaryAsString;
   private final int[] rowGroupIndices;
+  private final CompiledExpression filter;
 
   private ParquetOptions(Builder builder) {
     super(builder);
@@ -30,6 +33,7 @@ public class ParquetOptions extends ColumnFilterOptions {
       readBinaryAsString[i] = builder.binaryAsStringColumns.get(i);
     }
     rowGroupIndices = builder.rowGroupIndices;
+    filter = builder.filter;
   }
 
   DType timeUnit() {
@@ -47,6 +51,10 @@ public class ParquetOptions extends ColumnFilterOptions {
     return rowGroupIndices;
   }
 
+  CompiledExpression getFilter() {
+    return filter;
+  }
+
   public static ParquetOptions.Builder builder() {
     return new Builder();
   }
@@ -55,6 +63,7 @@ public class ParquetOptions extends ColumnFilterOptions {
     private DType unit = DType.EMPTY;
     final List<Boolean> binaryAsStringColumns = new ArrayList<>();
     int[] rowGroupIndices = null;
+    CompiledExpression filter = null;
 
     /**
      * Specify the time unit to use when returning timestamps.
@@ -75,6 +84,18 @@ public class ParquetOptions extends ColumnFilterOptions {
      */
     public Builder withRowGroups(int[] indices) {
       this.rowGroupIndices = indices;
+      return this;
+    }
+
+    /**
+     * Set an AST filter for predicate pushdown and row filtering during the Parquet read.
+     * The caller owns the expression and must keep it open until the reader is closed.
+     *
+     * @param filter compiled filter expression, or null for no filter
+     * @return builder for chaining
+     */
+    public Builder withFilter(CompiledExpression filter) {
+      this.filter = filter;
       return this;
     }
 

@@ -17,7 +17,9 @@ import ai.rapids.cudf.HostColumnVector.StructType;
 import ai.rapids.cudf.ast.BinaryOperation;
 import ai.rapids.cudf.ast.BinaryOperator;
 import ai.rapids.cudf.ast.ColumnReference;
+import ai.rapids.cudf.ast.ColumnNameReference;
 import ai.rapids.cudf.ast.CompiledExpression;
+import ai.rapids.cudf.ast.Literal;
 import ai.rapids.cudf.ast.TableReference;
 import com.google.common.base.Charsets;
 import com.google.common.collect.Lists;
@@ -1707,6 +1709,33 @@ public class TableTest extends CudfTestBase {
       }
       assertTrue(totalRows > 0);
       assertTrue(totalRows < 40000);
+    }
+  }
+
+  @Test
+  void testChunkedReadParquetWithFilter() throws IOException {
+    try (TempFile tempFile = TempFile.create("chunked-filter", ".parquet");
+         Table input = new Table.TestBuilder().column(1, 2, 3, 4).build()) {
+      ParquetWriterOptions writerOptions = ParquetWriterOptions.builder().build();
+      try (TableWriter writer = Table.writeParquetChunked(writerOptions, tempFile.getFile())) {
+        writer.write(input);
+      }
+
+      BinaryOperation expression = new BinaryOperation(
+          BinaryOperator.GREATER, new ColumnNameReference("_c0"), Literal.ofInt(2));
+      try (CompiledExpression filter = expression.compile()) {
+        ParquetOptions options = ParquetOptions.builder().withFilter(filter).build();
+        try (ParquetChunkedReader reader = new ParquetChunkedReader(
+            240000, options, tempFile.getFile())) {
+          long totalRows = 0;
+          while (reader.hasNext()) {
+            try (Table chunk = reader.readChunk()) {
+              totalRows += chunk.getRowCount();
+            }
+          }
+          assertEquals(2, totalRows);
+        }
+      }
     }
   }
 
