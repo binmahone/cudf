@@ -1717,7 +1717,7 @@ public class TableTest extends CudfTestBase {
     try (TempFile tempFile = TempFile.create("chunked-filter", ".parquet");
          Table input = new Table.TestBuilder().column(1, 2, 3, 4).build()) {
       ParquetWriterOptions writerOptions = ParquetWriterOptions.builder()
-          .withColumnNames("_c0")
+          .withNonNullableColumns("_c0")
           .build();
       try (TableWriter writer = Table.writeParquetChunked(writerOptions, tempFile.getFile())) {
         writer.write(input);
