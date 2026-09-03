@@ -1,6 +1,6 @@
 /*
  *
- *  SPDX-FileCopyrightText: Copyright (c) 2019, NVIDIA CORPORATION.
+ *  SPDX-FileCopyrightText: Copyright (c) 2019-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *  SPDX-License-Identifier: Apache-2.0
  *
  */
@@ -20,6 +20,7 @@ public class ParquetOptions extends ColumnFilterOptions {
 
   private final DType unit;
   private final boolean[] readBinaryAsString;
+  private final int[] rowGroupIndices;
 
   private ParquetOptions(Builder builder) {
     super(builder);
@@ -28,6 +29,7 @@ public class ParquetOptions extends ColumnFilterOptions {
     for (int i = 0 ; i < builder.binaryAsStringColumns.size() ; i++) {
       readBinaryAsString[i] = builder.binaryAsStringColumns.get(i);
     }
+    rowGroupIndices = builder.rowGroupIndices;
   }
 
   DType timeUnit() {
@@ -38,6 +40,13 @@ public class ParquetOptions extends ColumnFilterOptions {
     return readBinaryAsString;
   }
 
+  /**
+   * Return the selected Parquet row-group indices, or null when all row groups are selected.
+   */
+  public int[] getRowGroupIndices() {
+    return rowGroupIndices;
+  }
+
   public static ParquetOptions.Builder builder() {
     return new Builder();
   }
@@ -45,6 +54,7 @@ public class ParquetOptions extends ColumnFilterOptions {
   public static class Builder extends ColumnFilterOptions.Builder<Builder> {
     private DType unit = DType.EMPTY;
     final List<Boolean> binaryAsStringColumns = new ArrayList<>();
+    int[] rowGroupIndices = null;
 
     /**
      * Specify the time unit to use when returning timestamps.
@@ -54,6 +64,17 @@ public class ParquetOptions extends ColumnFilterOptions {
     public Builder withTimeUnit(DType unit) {
       assert unit.isTimestampType();
       this.unit = unit;
+      return this;
+    }
+
+    /**
+     * Restrict a single-source Parquet read to the given zero-based row-group indices.
+     *
+     * @param indices row-group indices in ascending order, or null to read all row groups
+     * @return builder for chaining
+     */
+    public Builder withRowGroups(int[] indices) {
+      this.rowGroupIndices = indices;
       return this;
     }
 

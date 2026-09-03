@@ -1,6 +1,6 @@
 /*
  *
- *  SPDX-FileCopyrightText: Copyright (c) 2022-2025, NVIDIA CORPORATION.
+ *  SPDX-FileCopyrightText: Copyright (c) 2022-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  *  SPDX-License-Identifier: Apache-2.0
  *
  */
@@ -52,7 +52,8 @@ public class ParquetChunkedReader implements AutoCloseable {
    */
   public ParquetChunkedReader(long chunkSizeByteLimit, long passReadLimit, ParquetOptions opts, File filePath) {
     long[] handles = create(chunkSizeByteLimit, passReadLimit, opts.getIncludeColumnNames(), opts.getReadBinaryAsString(),
-        filePath.getAbsolutePath(), null, opts.timeUnit().typeId.getNativeId());
+        filePath.getAbsolutePath(), null, opts.timeUnit().typeId.getNativeId(),
+        opts.getRowGroupIndices());
     handle = handles[0];
     if (handle == 0) {
       throw new IllegalStateException("Cannot create native chunked Parquet reader object.");
@@ -92,7 +93,7 @@ public class ParquetChunkedReader implements AutoCloseable {
                               long offset, long len) {
     long[] addrsSizes = new long[]{ buffer.getAddress() + offset, len };
     long[] handles = create(chunkSizeByteLimit,passReadLimit,  opts.getIncludeColumnNames(), opts.getReadBinaryAsString(), null,
-        addrsSizes, opts.timeUnit().typeId.getNativeId());
+        addrsSizes, opts.timeUnit().typeId.getNativeId(), opts.getRowGroupIndices());
     handle = handles[0];
     if (handle == 0) {
       throw new IllegalStateException("Cannot create native chunked Parquet reader object.");
@@ -119,7 +120,7 @@ public class ParquetChunkedReader implements AutoCloseable {
       addrsSizes[(i * 2) + 1] = buffers[i].getLength();
     }
     long[] handles = create(chunkSizeByteLimit,passReadLimit,  opts.getIncludeColumnNames(), opts.getReadBinaryAsString(), null,
-        addrsSizes, opts.timeUnit().typeId.getNativeId());
+        addrsSizes, opts.timeUnit().typeId.getNativeId(), opts.getRowGroupIndices());
     handle = handles[0];
     if (handle == 0) {
       throw new IllegalStateException("Cannot create native chunked Parquet reader object.");
@@ -236,7 +237,8 @@ public class ParquetChunkedReader implements AutoCloseable {
    */
   private static native long[] create(long chunkSizeByteLimit, long passReadLimit,
                                       String[] filterColumnNames, boolean[] binaryToString,
-                                      String filePath, long[] bufferAddrsSizes, int timeUnit);
+                                      String filePath, long[] bufferAddrsSizes, int timeUnit,
+                                      int[] rowGroupIndices);
 
   private static native long createWithDataSource(long chunkedSizeByteLimit,
       String[] filterColumnNames, boolean[] binaryToString, int timeUnit, long dataSourceHandle);

@@ -1693,6 +1693,24 @@ public class TableTest extends CudfTestBase {
   }
 
   @Test
+  void testChunkedReadSelectedParquetRowGroup() {
+    ParquetOptions options = ParquetOptions.builder()
+        .withRowGroups(new int[]{0})
+        .build();
+    try (ParquetChunkedReader reader = new ParquetChunkedReader(
+        240000, options, TEST_PARQUET_FILE_CHUNKED_READ)) {
+      long totalRows = 0;
+      while (reader.hasNext()) {
+        try (Table chunk = reader.readChunk()) {
+          totalRows += chunk.getRowCount();
+        }
+      }
+      assertTrue(totalRows > 0);
+      assertTrue(totalRows < 40000);
+    }
+  }
+
+  @Test
   void testChunkedReadParquetHostBuffers() throws Exception {
     long size = TEST_PARQUET_FILE_CHUNKED_READ.length();
     java.nio.file.Path path = TEST_PARQUET_FILE_CHUNKED_READ.toPath();
