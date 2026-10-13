@@ -54,7 +54,7 @@ public class HostColumnVectorCore implements AutoCloseable {
     if (DType.INT64.equals(offsetsType) && !DType.STRING.equals(type)) {
       throw new IllegalArgumentException("INT64 offsets are only supported for STRING");
     }
-    if (offsets != null && offsets.getLength() <
+    if (rows > 0 && offsets != null && offsets.getLength() <
         Math.multiplyExact(Math.addExact(rows, 1L), (long) offsetsType.getSizeInBytes())) {
       throw new IllegalArgumentException("Offsets buffer is too small for the declared type");
     }

@@ -8,6 +8,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -132,7 +133,7 @@ class HostStringOffsetsTest {
     try (HostColumnVector parent = list(strings(true, "abc", null, "DE"))) {
       assertEquals(DType.INT32, parent.getOffsetsType());
       assertEquals(DType.INT64, parent.getChildColumnView(0).getOffsetsType());
-      assertEquals(java.util.Arrays.asList("abc", null, "DE"), parent.getList(0));
+      assertEquals(Arrays.asList("abc", null, "DE"), parent.getList(0));
     }
   }
 
@@ -188,28 +189,172 @@ class HostStringOffsetsTest {
     }
   }
 
-  @Test void mixedColumnsRejectLegacySerializationBeforeWritingOrClosingInputs() {
+  private static HostColumnVector[] serializeAndUnpack(long start, long rows,
+                                                       HostColumnVector... columns) throws Exception {
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+    JCudfSerialization.writeToStream(columns, out, start, rows);
+    DataInputStream input = new DataInputStream(new ByteArrayInputStream(out.toByteArray()));
+    JCudfSerialization.SerializedTableHeader header = new JCudfSerialization.SerializedTableHeader(input);
+    try (HostMemoryBuffer buffer = HostMemoryBuffer.allocate(header.getDataLen(), false)) {
+      JCudfSerialization.readTableIntoBuffer(input, header, buffer);
+      return JCudfSerialization.unpackHostColumnVectors(header, buffer);
+    }
+  }
+
+  @Test void mixedColumnsSerializeTheirDeclaredWidthsWithoutClosingInputs() throws Exception {
     try (HostColumnVector narrow = strings(false, "first");
          HostColumnVector wide = strings(true, "second")) {
-      ByteArrayOutputStream output = new ByteArrayOutputStream();
-      assertThrows(UnsupportedOperationException.class, () -> JCudfSerialization.writeToStream(
-          new HostColumnVector[]{narrow, wide}, output, 0, 1));
-      assertEquals(0, output.size());
-      assertEquals("first", narrow.getJavaString(0));
-      assertEquals("second", wide.getJavaString(0));
+      HostColumnVector[] restored = serializeAndUnpack(0, 1, narrow, wide);
+      try (HostColumnVector first = restored[0]; HostColumnVector second = restored[1]) {
+        assertEquals(DType.INT32, first.getOffsetsType());
+        assertEquals(DType.INT64, second.getOffsetsType());
+        assertEquals("first", first.getJavaString(0));
+        assertEquals("second", second.getJavaString(0));
+      }
       assertEquals(1, narrow.getRefCount());
       assertEquals(1, wide.getRefCount());
     }
   }
 
-  @Test void nestedWideSerializationRejectsBeforeWriting() {
-    try (HostColumnVector parent = list(strings(true, "abc"))) {
-      ByteArrayOutputStream output = new ByteArrayOutputStream();
-      assertThrows(UnsupportedOperationException.class, () -> JCudfSerialization.writeToStream(
-          new HostColumnVector[]{parent}, output, 0, 1));
-      assertEquals(0, output.size());
-      assertEquals(Collections.singletonList("abc"), parent.getList(0));
+  @Test void nestedWideSerializationPreservesParentAndChildWidths() throws Exception {
+    try (HostColumnVector parent = list(strings(true, "abc", null, "DE"))) {
+      HostColumnVector[] restored = serializeAndUnpack(0, 1, parent);
+      try (HostColumnVector result = restored[0]) {
+        assertEquals(DType.INT32, result.getOffsetsType());
+        assertEquals(DType.INT64, result.getChildColumnView(0).getOffsetsType());
+        assertEquals(Arrays.asList("abc", null, "DE"), result.getList(0));
+      }
     }
   }
 
+  @Test void wideSerializationSliceRebasesOffsetsAndNulls() throws Exception {
+    try (HostColumnVector input = strings(true, "prefix", "abc", null, "", "\u00e9", "suffix")) {
+      HostColumnVector[] restored = serializeAndUnpack(1, 4, input);
+      try (HostColumnVector result = restored[0]) {
+        assertEquals(DType.INT64, result.getOffsetsType());
+        assertEquals(0, result.getStartListOffset(0));
+        assertEquals("abc", result.getJavaString(0));
+        assertTrue(result.isNull(1));
+        assertEquals("", result.getJavaString(2));
+        assertEquals("\u00e9", result.getJavaString(3));
+      }
+    }
+  }
+
+  @Test void serializedSourceBytePositionBeyondInt32IsRebased() throws Exception {
+    long start = (1L << 31) + 17;
+    HostMemoryBuffer data = HostMemoryBuffer.allocate(start + 3, false);
+    data.setBytes(start, "XYZ".getBytes(StandardCharsets.UTF_8), 0, 3);
+    HostMemoryBuffer offsets = HostMemoryBuffer.allocate(16, false);
+    offsets.setLong(0, start);
+    offsets.setLong(8, start + 3);
+    try (HostColumnVector input = new HostColumnVector(DType.STRING, 1, Optional.of(0L),
+             data, null, offsets, Collections.emptyList(), DType.INT64)) {
+      HostColumnVector[] restored = serializeAndUnpack(0, 1, input);
+      try (HostColumnVector result = restored[0]) {
+        assertEquals(DType.INT64, result.getOffsetsType());
+        assertEquals(0, result.getStartListOffset(0));
+        assertEquals("XYZ", result.getJavaString(0));
+      }
+    }
+  }
+
+  @Test void wideZeroRowsAndNestedEmptyChildCanBeUnpacked() throws Exception {
+    try (HostColumnVector empty = strings(true)) {
+      HostColumnVector[] restored = serializeAndUnpack(0, 0, empty);
+      try (HostColumnVector result = restored[0]) {
+        assertEquals(0, result.getRowCount());
+        assertEquals(DType.INT64, result.getOffsetsType());
+      }
+    }
+    try (HostColumnVector parent = list(strings(true))) {
+      HostColumnVector[] restored = serializeAndUnpack(0, 1, parent);
+      try (HostColumnVector result = restored[0]) {
+        assertEquals(Collections.emptyList(), result.getList(0));
+        assertEquals(DType.INT64, result.getChildColumnView(0).getOffsetsType());
+      }
+    }
+  }
+
+  @Test void versionsDistinguishOrdinaryAndWideStringTables() throws Exception {
+    for (boolean wide : new boolean[]{false, true}) {
+      try (HostColumnVector column = strings(wide, "abc")) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        JCudfSerialization.writeToStream(new HostColumnVector[]{column}, out, 0, 1);
+        DataInputStream in = new DataInputStream(new ByteArrayInputStream(out.toByteArray()));
+        assertEquals(0x43554446, in.readInt());
+        assertEquals(wide ? 1 : 0, in.readShort());
+      }
+    }
+  }
+
+  static JCudfSerialization.HostConcatResult serialized(long start, long rows,
+                                                        HostColumnVector... columns) throws Exception {
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+    JCudfSerialization.writeToStream(columns, out, start, rows);
+    DataInputStream input = new DataInputStream(new ByteArrayInputStream(out.toByteArray()));
+    JCudfSerialization.SerializedTableHeader header = new JCudfSerialization.SerializedTableHeader(input);
+    HostMemoryBuffer buffer = HostMemoryBuffer.allocate(header.getDataLen(), false);
+    try {
+      JCudfSerialization.readTableIntoBuffer(input, header, buffer);
+      return new JCudfSerialization.HostConcatResult(header, buffer);
+    } catch (Throwable failure) {
+      buffer.close();
+      throw failure;
+    }
+  }
+
+  @Test void mixedWidthsConcatenateAndRestoreAsWideStrings() throws Exception {
+    try (HostColumnVector narrow = strings(false, "first", null);
+         HostColumnVector wide = strings(true, "second", "");
+         JCudfSerialization.HostConcatResult a = serialized(0, 2, narrow);
+         JCudfSerialization.HostConcatResult b = serialized(0, 2, wide);
+         JCudfSerialization.HostConcatResult merged = JCudfSerialization.concatToHostBuffer(
+             new JCudfSerialization.SerializedTableHeader[]{a.getTableHeader(), b.getTableHeader()},
+             new HostMemoryBuffer[]{a.getHostBuffer(), b.getHostBuffer()})) {
+      HostColumnVector[] columns = JCudfSerialization.unpackHostColumnVectors(
+          merged.getTableHeader(), merged.getHostBuffer());
+      try (HostColumnVector result = columns[0]) {
+        assertEquals(DType.INT64, result.getOffsetsType());
+        assertEquals("first", result.getJavaString(0));
+        assertTrue(result.isNull(1));
+        assertEquals("second", result.getJavaString(2));
+        assertEquals("", result.getJavaString(3));
+        assertEquals(11, result.getEndListOffset(3));
+      }
+    }
+  }
+
+  @Test void narrowConcatenationKeepsNarrowOffsets() throws Exception {
+    try (HostColumnVector input = strings(false, "abc", null);
+         JCudfSerialization.HostConcatResult a = serialized(0, 2, input);
+         JCudfSerialization.HostConcatResult merged = JCudfSerialization.concatToHostBuffer(
+             new JCudfSerialization.SerializedTableHeader[]{a.getTableHeader(), a.getTableHeader()},
+             new HostMemoryBuffer[]{a.getHostBuffer(), a.getHostBuffer()})) {
+      HostColumnVector[] columns = JCudfSerialization.unpackHostColumnVectors(
+          merged.getTableHeader(), merged.getHostBuffer());
+      try (HostColumnVector result = columns[0]) {
+        assertEquals(DType.INT32, result.getOffsetsType());
+        assertEquals("abc", result.getJavaString(0));
+        assertTrue(result.isNull(1));
+        assertEquals("abc", result.getJavaString(2));
+        assertTrue(result.isNull(3));
+      }
+    }
+  }
+
+  @Test void structWithFixedAndWideChildrenPreservesValues() throws Exception {
+    try (HostColumnVector input = new HostColumnVector(DType.STRUCT, 2, Optional.of(0L),
+             null, null, null, Arrays.asList(HostColumnVector.fromInts(17, 23),
+                 strings(true, "abc", null)))) {
+      HostColumnVector[] columns = serializeAndUnpack(0, 2, input);
+      try (HostColumnVector result = columns[0]) {
+        assertEquals(17, result.getChildColumnView(0).getInt(0));
+        assertEquals(23, result.getChildColumnView(0).getInt(1));
+        assertEquals(DType.INT64, result.getChildColumnView(1).getOffsetsType());
+        assertEquals("abc", result.getChildColumnView(1).getJavaString(0));
+        assertTrue(result.getChildColumnView(1).isNull(1));
+      }
+    }
+  }
 }

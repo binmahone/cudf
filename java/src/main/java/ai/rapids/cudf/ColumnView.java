@@ -5451,7 +5451,7 @@ public class ColumnView implements AutoCloseable, BinaryOperable {
       DeviceMemoryBuffer data = null;
       DeviceMemoryBuffer valid = null;
       DeviceMemoryBuffer offsets = null;
-      if (dataBuffer != null) {
+      if (rows > 0 && dataBuffer != null) {
         long dataLen = rows * type.getSizeInBytes();
         if (type.equals(DType.STRING)) {
           // This needs a different type
@@ -5465,12 +5465,12 @@ public class ColumnView implements AutoCloseable, BinaryOperable {
         data = DeviceMemoryBuffer.allocate(dataLen);
         data.copyFromHostBuffer(dataBuffer, 0, dataLen);
       }
-      if (validityBuffer != null) {
+      if (rows > 0 && validityBuffer != null) {
         long validLen = getValidityBufferSize((int)rows);
         valid = DeviceMemoryBuffer.allocate(validLen);
         valid.copyFromHostBuffer(validityBuffer, 0, validLen);
       }
-      if (offsetBuffer != null) {
+      if (rows > 0 && offsetBuffer != null) {
         long offsetsLen = Math.multiplyExact(rows + 1, (long) offsetsType.getSizeInBytes());
         offsets = DeviceMemoryBuffer.allocate(offsetsLen);
         offsets.copyFromHostBuffer(offsetBuffer, 0, offsetsLen);
