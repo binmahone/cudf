@@ -925,6 +925,9 @@ public class JCudfSerialization {
   }
 
   private static ColumnBufferProvider[] providersFrom(HostColumnVector[] columns, boolean closeAtEnd) {
+    for (HostColumnVector column : columns) {
+      column.require32BitOffsets("JCudfSerialization");
+    }
     ColumnBufferProvider[] providers = new ColumnBufferProvider[columns.length];
     for (int i = 0; i < columns.length; i++) {
       providers[i] = new ColumnProvider(columns[i], closeAtEnd);

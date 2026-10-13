@@ -28,6 +28,7 @@ public class HostColumnVectorCore implements AutoCloseable {
 
   protected final OffHeapState offHeap;
   protected final DType type;
+  private final DType offsetsType;
   protected long rows;
   protected Optional<Long> nullCount;
   protected List<HostColumnVectorCore> children;
@@ -36,11 +37,33 @@ public class HostColumnVectorCore implements AutoCloseable {
   public HostColumnVectorCore(DType type, long rows,
                               Optional<Long> nullCount, HostMemoryBuffer data, HostMemoryBuffer validity,
                               HostMemoryBuffer offsets, List<HostColumnVectorCore> nestedChildren) {
+    this(type, rows, nullCount, data, validity, offsets, nestedChildren, DType.INT32);
+  }
+
+  /**
+   * Creates a host column with an explicit offsets type. STRING supports INT32 and INT64;
+   * LIST retains INT32 offsets. Buffer contents may still be receiving asynchronous writes.
+   */
+  public HostColumnVectorCore(DType type, long rows,
+                              Optional<Long> nullCount, HostMemoryBuffer data,
+                              HostMemoryBuffer validity, HostMemoryBuffer offsets,
+                              List<HostColumnVectorCore> nestedChildren, DType offsetsType) {
+    if (!DType.INT32.equals(offsetsType) && !DType.INT64.equals(offsetsType)) {
+      throw new IllegalArgumentException("Offsets type must be INT32 or INT64");
+    }
+    if (DType.INT64.equals(offsetsType) && !DType.STRING.equals(type)) {
+      throw new IllegalArgumentException("INT64 offsets are only supported for STRING");
+    }
+    if (offsets != null && offsets.getLength() <
+        Math.multiplyExact(Math.addExact(rows, 1L), offsetsType.getSizeInBytes())) {
+      throw new IllegalArgumentException("Offsets buffer is too small for the declared type");
+    }
     // NOTE: This constructor MUST NOT examine the contents of any host buffers, as they may be
     //       asynchronously written by the device.
     this.offHeap = new OffHeapState(data, validity,  offsets);
     MemoryCleaner.register(this, offHeap);
     this.type = type;
+    this.offsetsType = offsetsType;
     this.rows = rows;
     this.nullCount = nullCount;
     this.children = nestedChildren;
@@ -72,6 +95,26 @@ public class HostColumnVectorCore implements AutoCloseable {
    */
   public HostMemoryBuffer getOffsets() {
     return offHeap.offsets;
+  }
+
+  /**
+   * Returns the offsets type for STRING or LIST. Other types do not use this metadata.
+   */
+  public DType getOffsetsType() {
+    return offsetsType;
+  }
+
+  /**
+   * Rejects wide string offsets recursively at consumers requiring the INT32 layout.
+   */
+  public void require32BitOffsets(String operation) {
+    if (DType.STRING.equals(type) && DType.INT64.equals(offsetsType)) {
+      throw new UnsupportedOperationException(operation +
+          " does not support INT64 string offsets");
+    }
+    for (HostColumnVectorCore child : children) {
+      child.require32BitOffsets(operation);
+    }
   }
 
   public HostColumnVectorCore getChildColumnView(int childIndex) {
@@ -133,12 +176,8 @@ public class HostColumnVectorCore implements AutoCloseable {
     if (isNull(rowIndex)) {
       return null;
     }
-    int start = (int)getStartListOffset(rowIndex);
-    int end = (int)getEndListOffset(rowIndex);
-    int size = end - start;
-    byte[] rawData = new byte[size];
-    if (size > 0) {
-      offHeap.data.getBytes(rawData, 0, start, size);
+    byte[] rawData = getUTF8(rowIndex);
+    if (rawData.length > 0) {
       return new String(rawData);
     } else {
       return new String();
@@ -263,7 +302,7 @@ public class HostColumnVectorCore implements AutoCloseable {
     assert type.equals(DType.STRING) || type.equals(DType.LIST): type +
       " is not a supported string or list type.";
     assert (index >= 0 && index < rows) : "index is out of range 0 <= " + index + " < " + rows;
-    return offHeap.offsets.getInt(index * 4);
+    return getOffset(index);
   }
 
   /**
@@ -282,7 +321,13 @@ public class HostColumnVectorCore implements AutoCloseable {
       " is not a supported string or list type.";
     assert (index >= 0 && index < rows) : "index is out of range 0 <= " + index + " < " + rows;
     // The offsets has one more entry than there are rows.
-    return offHeap.offsets.getInt((index + 1) * 4);
+    return getOffset(index + 1);
+  }
+
+  private long getOffset(long index) {
+    long byteOffset = Math.multiplyExact(index, offsetsType.getSizeInBytes());
+    return DType.INT64.equals(offsetsType) ? offHeap.offsets.getLong(byteOffset) :
+        offHeap.offsets.getInt(byteOffset);
   }
 
   /**
@@ -353,8 +398,12 @@ public class HostColumnVectorCore implements AutoCloseable {
   public byte[] getUTF8(long index) {
     assert type.equals(DType.STRING) : type + " is not a supported string type.";
     assertsForGet(index);
-    int start = (int)getStartListOffset(index);
-    int size = (int)getEndListOffset(index) - start;
+    long start = getStartListOffset(index);
+    long end = getEndListOffset(index);
+    if (start < 0 || end < start) {
+      throw new IllegalStateException("Invalid string offsets: " + start + " to " + end);
+    }
+    int size = Math.toIntExact(end - start);
     byte[] rawData = new byte[size];
     if (size > 0) {
       offHeap.data.getBytes(rawData, 0, start, size);

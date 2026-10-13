@@ -97,9 +97,22 @@ public final class HostColumnVector extends HostColumnVectorCore {
   public HostColumnVector(DType type, long rows, Optional<Long> nullCount,
                           HostMemoryBuffer hostDataBuffer, HostMemoryBuffer hostValidityBuffer,
                           HostMemoryBuffer offsetBuffer, List<HostColumnVectorCore> nestedHcv) {
+    this(type, rows, nullCount, hostDataBuffer, hostValidityBuffer, offsetBuffer,
+        nestedHcv, DType.INT32);
+  }
+
+  /**
+   * Creates a host column with explicit STRING offsets width and optional nested children.
+   * Existing constructors and builders use INT32 offsets.
+   */
+  public HostColumnVector(DType type, long rows, Optional<Long> nullCount,
+                          HostMemoryBuffer hostDataBuffer, HostMemoryBuffer hostValidityBuffer,
+                          HostMemoryBuffer offsetBuffer, List<HostColumnVectorCore> nestedHcv,
+                          DType offsetsType) {
     // NOTE: This constructor MUST NOT examine the contents of any host buffers, as they may be
     //       asynchronously written by the device.
-    super(type, rows, nullCount, hostDataBuffer, hostValidityBuffer, offsetBuffer, nestedHcv);
+    super(type, rows, nullCount, hostDataBuffer, hostValidityBuffer, offsetBuffer,
+        nestedHcv, offsetsType);
     refCount = 0;
     incRefCountInternal(true);
   }
@@ -253,6 +266,7 @@ public final class HostColumnVector extends HostColumnVectorCore {
    * Copy the data to the device.
    */
   public ColumnVector copyToDevice() {
+    require32BitOffsets("Host-to-device copy");
     if (rows == 0) {
       if (type.isNestedType()) {
         return ColumnView.NestedColumnVector.createColumnVector(type, 0,
