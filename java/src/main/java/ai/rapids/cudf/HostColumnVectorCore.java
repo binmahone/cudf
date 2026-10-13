@@ -55,7 +55,7 @@ public class HostColumnVectorCore implements AutoCloseable {
       throw new IllegalArgumentException("INT64 offsets are only supported for STRING");
     }
     if (offsets != null && offsets.getLength() <
-        Math.multiplyExact(Math.addExact(rows, 1L), offsetsType.getSizeInBytes())) {
+        Math.multiplyExact(Math.addExact(rows, 1L), (long) offsetsType.getSizeInBytes())) {
       throw new IllegalArgumentException("Offsets buffer is too small for the declared type");
     }
     // NOTE: This constructor MUST NOT examine the contents of any host buffers, as they may be
@@ -325,7 +325,7 @@ public class HostColumnVectorCore implements AutoCloseable {
   }
 
   private long getOffset(long index) {
-    long byteOffset = Math.multiplyExact(index, offsetsType.getSizeInBytes());
+    long byteOffset = Math.multiplyExact(index, (long) offsetsType.getSizeInBytes());
     return DType.INT64.equals(offsetsType) ? offHeap.offsets.getLong(byteOffset) :
         offHeap.offsets.getInt(byteOffset);
   }

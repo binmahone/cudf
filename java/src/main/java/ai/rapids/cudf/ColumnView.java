@@ -5441,7 +5441,7 @@ public class ColumnView implements AutoCloseable, BinaryOperable {
     private static long getEndStringOffset(long totalRows, long index, HostMemoryBuffer offsets,
                                            DType offsetsType) {
       assert index < totalRows;
-      long byteOffset = Math.multiplyExact(index + 1, offsetsType.getSizeInBytes());
+      long byteOffset = Math.multiplyExact(index + 1, (long) offsetsType.getSizeInBytes());
       return DType.INT64.equals(offsetsType) ? offsets.getLong(byteOffset) : offsets.getInt(byteOffset);
     }
 
@@ -5471,7 +5471,7 @@ public class ColumnView implements AutoCloseable, BinaryOperable {
         valid.copyFromHostBuffer(validityBuffer, 0, validLen);
       }
       if (offsetBuffer != null) {
-        long offsetsLen = Math.multiplyExact(rows + 1, offsetsType.getSizeInBytes());
+        long offsetsLen = Math.multiplyExact(rows + 1, (long) offsetsType.getSizeInBytes());
         offsets = DeviceMemoryBuffer.allocate(offsetsLen);
         offsets.copyFromHostBuffer(offsetBuffer, 0, offsetsLen);
       }

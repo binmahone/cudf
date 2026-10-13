@@ -304,7 +304,7 @@ public final class HostColumnVector extends HostColumnVectorCore {
 
         HostMemoryBuffer hoff = this.offHeap.offsets;
         if (hoff != null) {
-          long offsetsLen = Math.multiplyExact(rows + 1, getOffsetsType().getSizeInBytes());
+          long offsetsLen = Math.multiplyExact(rows + 1, (long) getOffsetsType().getSizeInBytes());
           offsets = DeviceMemoryBuffer.allocate(offsetsLen);
           offsets.copyFromHostBuffer(hoff, 0, offsetsLen);
         }

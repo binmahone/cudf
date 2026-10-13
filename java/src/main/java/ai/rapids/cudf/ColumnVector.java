@@ -250,7 +250,7 @@ public final class ColumnVector extends ColumnView {
         throw new IllegalArgumentException("String column size exceeds the offsets row-count limit");
       }
       if (numRows > 0 && (offsetBuffer == null ||
-          offsetBuffer.getLength() < Math.multiplyExact(numRows + 1L, 8))) {
+          offsetBuffer.getLength() < Math.multiplyExact(numRows + 1L, 8L))) {
         throw new IllegalArgumentException("String offsets buffer is too short for INT64 offsets");
       }
     }
