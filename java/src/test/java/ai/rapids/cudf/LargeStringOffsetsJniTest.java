@@ -4,13 +4,19 @@
  */
 package ai.rapids.cudf;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Optional;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class LargeStringOffsetsJniTest {
+  @AfterAll static void verifyJarNativeLibraries() throws IOException {
+    StringOffsetsJniTest.verifyJarNativeLibraries();
+  }
+
   @Test void denseCharsBeyondTwoGiBRoundTrip() {
     int rows = 2049;
     long bytesPerRow = 1L << 20;

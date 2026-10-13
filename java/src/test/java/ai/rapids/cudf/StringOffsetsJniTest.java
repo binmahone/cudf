@@ -4,13 +4,29 @@
  */
 package ai.rapids.cudf;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.List;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Optional;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class StringOffsetsJniTest {
+  @AfterAll static void verifyJarNativeLibraries() throws IOException {
+    List<String> mappings = Files.readAllLines(Paths.get("/proc/self/maps"));
+    for (String library : Arrays.asList("cudf", "cudfjni")) {
+      boolean fromJar = mappings.stream().anyMatch(line -> line.contains("/tmp/" + library)
+          && line.contains(".so"));
+      assertTrue(fromJar, library + " must be loaded from extracted JAR resources");
+    }
+    mappings.stream().filter(line -> line.contains("/tmp/cudf") && line.contains(".so"))
+        .forEach(System.out::println);
+  }
+
   private static void assertStrings(HostColumnVectorCore host, String... expected) {
     assertEquals(expected.length, host.getRowCount());
     for (int i = 0; i < expected.length; i++) {
