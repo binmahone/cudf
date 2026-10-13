@@ -13,6 +13,7 @@ import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
@@ -953,10 +954,31 @@ public final class HostColumnVector extends HostColumnVectorCore {
     return build(DType.TIMESTAMP_NANOSECONDS, values.length, (b) -> b.appendBoxed(values));
   }
 
-  /**
-   * Build
-   */
+  private static HostMemoryBuffer widenStringOffsets(HostMemoryBuffer source,
+      long initializedOffsets, long capacity) {
+    HostMemoryBuffer wide = HostMemoryBuffer.allocate(Math.multiplyExact(capacity, 8L));
+    try {
+      for (long i = 0; i < initializedOffsets; i++) {
+        wide.setLong(i * 8L, source.getInt(i * 4L));
+      }
+    } catch (Throwable t) {
+      wide.close();
+      throw t;
+    }
+    source.close();
+    return wide;
+  }
 
+  private static void writeStringOffset(HostMemoryBuffer offsets, DType offsetsType,
+      long row, long value) {
+    if (offsetsType == DType.INT64) {
+      offsets.setLong(row * 8L, value);
+    } else {
+      offsets.setInt(row * 4L, Math.toIntExact(value));
+    }
+  }
+
+  /** Builds host columns, including nested columns. */
   public static final class ColumnBuilder implements AutoCloseable {
 
     private DType type;
@@ -978,7 +1000,8 @@ public final class HostColumnVector extends HostColumnVectorCore {
     // adapt HostMemoryBuffer.setXXX, which requires a long offset.
     private long currentIndex = 0;
     // Only for Strings: pointer of the byte (data) buffer
-    private int currentStringByteIndex = 0;
+    private long currentStringByteIndex = 0;
+    private DType offsetsType = DType.INT32;
     // Use bit shift instead of multiply to transform row offset to byte offset
     private int bitShiftBySize = 0;
     private static final int bitShiftByOffset = (int)(Math.log(OFFSET_SIZE) / Math.log(2));
@@ -1011,7 +1034,7 @@ public final class HostColumnVector extends HostColumnVectorCore {
           this.growStringBuffersAndRows(0);
           this.growValidBuffer();
           setNullAt(currentIndex++);
-          offsets.setInt(currentIndex << bitShiftByOffset, currentStringByteIndex);
+          writeStringOffset(offsets, offsetsType, currentIndex, currentStringByteIndex);
         };
       } else if (this.type == DType.STRUCT) {
         this.nullHandler = () -> {
@@ -1041,7 +1064,7 @@ public final class HostColumnVector extends HostColumnVectorCore {
         growValidBuffer();
       }
       HostColumnVector hostColumnVector = new HostColumnVector(type, rows, Optional.of(nullCount), data, valid, offsets,
-          hostColumnVectorCoreList);
+          hostColumnVectorCoreList, offsetsType);
       built = true;
       return hostColumnVector;
     }
@@ -1055,7 +1078,7 @@ public final class HostColumnVector extends HostColumnVectorCore {
       if (valid != null) {
         growValidBuffer();
       }
-      return new HostColumnVectorCore(type, rows, Optional.of(nullCount), data, valid, offsets, hostColumnVectorCoreList);
+      return new HostColumnVectorCore(type, rows, Optional.of(nullCount), data, valid, offsets, hostColumnVectorCoreList, offsetsType);
     }
 
     public ColumnBuilder appendLists(List... inputLists) {
@@ -1173,15 +1196,19 @@ public final class HostColumnVector extends HostColumnVectorCore {
 
       if (rows > rowCapacity) {
         long newCap = Math.min(rowCapacity * 2, Integer.MAX_VALUE - 2);
-        offsets = copyBuffer(HostMemoryBuffer.allocate((newCap + 1) << bitShiftByOffset), offsets);
+        offsets = copyBuffer(HostMemoryBuffer.allocate((newCap + 1) * offsetsType.getSizeInBytes()), offsets);
         rowCapacity = newCap;
       }
 
-      long currentLength = currentStringByteIndex + stringLength;
+      long currentLength = Math.addExact(currentStringByteIndex, (long) stringLength);
+      if (offsetsType == DType.INT32 && currentLength > Integer.MAX_VALUE) {
+        offsets = widenStringOffsets(offsets, currentIndex + 1, rowCapacity + 1);
+        offsetsType = DType.INT64;
+      }
       if (currentLength > data.length) {
         long requiredLength = data.length;
         do {
-          requiredLength = requiredLength * 2;
+          requiredLength = Math.multiplyExact(requiredLength, 2L);
         } while (currentLength > requiredLength);
         data = copyBuffer(HostMemoryBuffer.allocate(requiredLength), data);
       }
@@ -1349,7 +1376,7 @@ public final class HostColumnVector extends HostColumnVectorCore {
 
     @Deprecated
     public int getCurrentByteIndex() {
-      return currentStringByteIndex;
+      return Math.toIntExact(currentStringByteIndex);
     }
 
     public final ColumnBuilder append(byte value) {
@@ -1442,7 +1469,7 @@ public final class HostColumnVector extends HostColumnVectorCore {
       assert value != null : "appendNull must be used to append null strings";
       assert srcOffset >= 0;
       assert length >= 0;
-      assert value.length + srcOffset <= length;
+      assert length <= value.length - srcOffset;
       assert type.equals(DType.STRING) : " type " + type + " is not String";
       growStringBuffersAndRows(length);
       assert currentIndex < rows;
@@ -1450,7 +1477,7 @@ public final class HostColumnVector extends HostColumnVectorCore {
         data.setBytes(currentStringByteIndex, value, srcOffset, length);
       }
       currentStringByteIndex += length;
-      offsets.setInt(++currentIndex << bitShiftByOffset, currentStringByteIndex);
+      writeStringOffset(offsets, offsetsType, ++currentIndex, currentStringByteIndex);
       return this;
     }
 
@@ -1569,7 +1596,8 @@ public final class HostColumnVector extends HostColumnVectorCore {
     private HostMemoryBuffer offsets;
     private long currentIndex = 0;
     private long nullCount;
-    private int currentStringByteIndex = 0;
+    private long currentStringByteIndex = 0;
+    private DType offsetsType = DType.INT32;
     private boolean built;
 
     /**
@@ -1758,17 +1786,19 @@ public final class HostColumnVector extends HostColumnVectorCore {
       assert value != null : "appendNull must be used to append null strings";
       assert offset >= 0;
       assert length >= 0;
-      assert length + offset <= value.length;
+      assert length <= value.length - offset;
       assert type.equals(DType.STRING);
       assert currentIndex < rows;
       // just for strings we want to throw a real exception if we would overrun the buffer
       long oldLen = data.getLength();
       long newLen = oldLen;
-      while (currentStringByteIndex + length > newLen) {
-        newLen *= 2;
+      long requiredLength = Math.addExact(currentStringByteIndex, (long) length);
+      while (requiredLength > newLen) {
+        newLen = Math.multiplyExact(newLen, 2L);
       }
-      if (newLen > Integer.MAX_VALUE) {
-        throw new IllegalStateException("A string buffer is not supported over 2GB in size");
+      if (offsetsType == DType.INT32 && requiredLength > Integer.MAX_VALUE) {
+        offsets = widenStringOffsets(offsets, currentIndex + 1, rows + 1);
+        offsetsType = DType.INT64;
       }
       if (newLen != oldLen) {
         // need to grow the size of the buffer.
@@ -1789,7 +1819,7 @@ public final class HostColumnVector extends HostColumnVectorCore {
       }
       currentStringByteIndex += length;
       currentIndex++;
-      offsets.setInt(currentIndex * OFFSET_SIZE, currentStringByteIndex);
+      writeStringOffset(offsets, offsetsType, currentIndex, currentStringByteIndex);
       return this;
     }
 
@@ -2058,7 +2088,7 @@ public final class HostColumnVector extends HostColumnVectorCore {
       setNullAt(currentIndex);
       currentIndex++;
       if (type.equals(DType.STRING)) {
-        offsets.setInt(currentIndex * OFFSET_SIZE, currentStringByteIndex);
+        writeStringOffset(offsets, offsetsType, currentIndex, currentStringByteIndex);
       }
       return this;
     }
@@ -2083,7 +2113,8 @@ public final class HostColumnVector extends HostColumnVectorCore {
      */
     public final HostColumnVector build() {
       HostColumnVector cv = new HostColumnVector(type,
-          currentIndex, Optional.of(nullCount), data, valid, offsets);
+          currentIndex, Optional.of(nullCount), data, valid, offsets,
+          Collections.emptyList(), offsetsType);
       built = true;
       return cv;
     }

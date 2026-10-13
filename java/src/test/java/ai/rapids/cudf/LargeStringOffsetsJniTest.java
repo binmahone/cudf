@@ -6,8 +6,6 @@ package ai.rapids.cudf;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.Optional;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -17,16 +15,21 @@ class LargeStringOffsetsJniTest {
     StringOffsetsJniTest.verifyJarNativeLibraries();
   }
 
+  private static HostColumnVector buildDenseStrings(int rows, int bytesPerRow) {
+    byte[] value = new byte[bytesPerRow];
+    Arrays.fill(value, (byte) 'X');
+    try (HostColumnVector.Builder builder = HostColumnVector.builder(rows,
+        rows * (long) bytesPerRow)) {
+      for (int row = 0; row < rows; row++) builder.appendUTF8String(value);
+      return builder.build();
+    }
+  }
+
   @Test void denseCharsBeyondTwoGiBRoundTrip() {
     int rows = 2049;
     long bytesPerRow = 1L << 20;
     long totalBytes = rows * bytesPerRow;
-    HostMemoryBuffer data = HostMemoryBuffer.allocate(totalBytes, false);
-    HostMemoryBuffer offsets = HostMemoryBuffer.allocate((rows + 1L) * Long.BYTES, false);
-    data.setMemory(0, totalBytes, (byte) 'X');
-    for (int row = 0; row <= rows; row++) offsets.setLong(row * 8L, row * bytesPerRow);
-    try (HostColumnVector input = new HostColumnVector(DType.STRING, rows, Optional.of(0L),
-             data, null, offsets, Collections.emptyList(), DType.INT64);
+    try (HostColumnVector input = buildDenseStrings(rows, Math.toIntExact(bytesPerRow));
          ColumnVector device = input.copyToDevice();
          BaseDeviceMemoryBuffer deviceData = device.getData();
          HostColumnVector output = device.copyToHost()) {
