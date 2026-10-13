@@ -73,9 +73,15 @@ public final class ColumnVector extends ColumnView {
   private static OffHeapState makeOffHeap(DType type, long rows, Optional<Long> nullCount,
       DeviceMemoryBuffer dataBuffer, DeviceMemoryBuffer validityBuffer,
       DeviceMemoryBuffer offsetBuffer) {
+    return makeOffHeap(type, rows, nullCount, dataBuffer, validityBuffer, offsetBuffer, DType.INT32);
+  }
+
+  private static OffHeapState makeOffHeap(DType type, long rows, Optional<Long> nullCount,
+      DeviceMemoryBuffer dataBuffer, DeviceMemoryBuffer validityBuffer,
+      DeviceMemoryBuffer offsetBuffer, DType offsetsType) {
     long viewHandle = initViewHandle(
-        type, (int)rows, nullCount.orElse(UNKNOWN_NULL_COUNT).intValue(),
-        dataBuffer, validityBuffer, offsetBuffer, null);
+        type, Math.toIntExact(rows), nullCount.orElse(UNKNOWN_NULL_COUNT).intValue(),
+        dataBuffer, validityBuffer, offsetBuffer, null, offsetsType);
     return new OffHeapState(dataBuffer, validityBuffer, offsetBuffer, null, viewHandle);
   }
 
@@ -96,7 +102,14 @@ public final class ColumnVector extends ColumnView {
   public ColumnVector(DType type, long rows, Optional<Long> nullCount,
       DeviceMemoryBuffer dataBuffer, DeviceMemoryBuffer validityBuffer,
       DeviceMemoryBuffer offsetBuffer) {
-    super(makeOffHeap(type, rows, nullCount, dataBuffer, validityBuffer, offsetBuffer));
+    this(type, rows, nullCount, dataBuffer, validityBuffer, offsetBuffer, DType.INT32);
+  }
+
+  /** Creates a device column with an explicit STRING offsets type. */
+  public ColumnVector(DType type, long rows, Optional<Long> nullCount,
+      DeviceMemoryBuffer dataBuffer, DeviceMemoryBuffer validityBuffer,
+      DeviceMemoryBuffer offsetBuffer, DType offsetsType) {
+    super(makeOffHeap(type, rows, nullCount, dataBuffer, validityBuffer, offsetBuffer, offsetsType));
     assert !type.equals(DType.LIST) : "This constructor should not be used for list type";
     if (!type.equals(DType.STRING)) {
       assert offsetBuffer == null : "offsets are only supported for STRING";
@@ -115,9 +128,17 @@ public final class ColumnVector extends ColumnView {
   static OffHeapState makeOffHeap(DType type, long rows, Optional<Long> nullCount,
       DeviceMemoryBuffer dataBuffer, DeviceMemoryBuffer validityBuffer,
       DeviceMemoryBuffer offsetBuffer, List<DeviceMemoryBuffer> toClose, long[] childHandles) {
-    long viewHandle = initViewHandle(type, (int)rows, nullCount.orElse(UNKNOWN_NULL_COUNT).intValue(),
+    return makeOffHeap(type, rows, nullCount, dataBuffer, validityBuffer, offsetBuffer,
+        toClose, childHandles, DType.INT32);
+  }
+
+  private static OffHeapState makeOffHeap(DType type, long rows, Optional<Long> nullCount,
+      DeviceMemoryBuffer dataBuffer, DeviceMemoryBuffer validityBuffer,
+      DeviceMemoryBuffer offsetBuffer, List<DeviceMemoryBuffer> toClose, long[] childHandles,
+      DType offsetsType) {
+    long viewHandle = initViewHandle(type, Math.toIntExact(rows), nullCount.orElse(UNKNOWN_NULL_COUNT).intValue(),
         dataBuffer, validityBuffer,
-        offsetBuffer, childHandles);
+        offsetBuffer, childHandles, offsetsType);
     return new OffHeapState(dataBuffer, validityBuffer, offsetBuffer, toClose, viewHandle);
   }
 
@@ -140,7 +161,17 @@ public final class ColumnVector extends ColumnView {
   public ColumnVector(DType type, long rows, Optional<Long> nullCount,
                       DeviceMemoryBuffer dataBuffer, DeviceMemoryBuffer validityBuffer,
                       DeviceMemoryBuffer offsetBuffer, List<DeviceMemoryBuffer> toClose, long[] childHandles) {
-    super(makeOffHeap(type, rows, nullCount, dataBuffer, validityBuffer, offsetBuffer, toClose, childHandles));
+    this(type, rows, nullCount, dataBuffer, validityBuffer, offsetBuffer, toClose,
+        childHandles, DType.INT32);
+  }
+
+  /** Creates a device column and child views with an explicit STRING offsets type. */
+  public ColumnVector(DType type, long rows, Optional<Long> nullCount,
+                      DeviceMemoryBuffer dataBuffer, DeviceMemoryBuffer validityBuffer,
+                      DeviceMemoryBuffer offsetBuffer, List<DeviceMemoryBuffer> toClose,
+                      long[] childHandles, DType offsetsType) {
+    super(makeOffHeap(type, rows, nullCount, dataBuffer, validityBuffer, offsetBuffer,
+        toClose, childHandles, offsetsType));
     if (!type.equals(DType.STRING) && !type.equals(DType.LIST)) {
       assert offsetBuffer == null : "offsets are only supported for STRING, LISTS";
     }
@@ -199,10 +230,38 @@ public final class ColumnVector extends ColumnView {
                              BaseDeviceMemoryBuffer dataBuffer,
                              BaseDeviceMemoryBuffer validityBuffer,
                              BaseDeviceMemoryBuffer offsetBuffer, long[] childHandles) {
+    return initViewHandle(type, numRows, nullCount, dataBuffer, validityBuffer,
+        offsetBuffer, childHandles, DType.INT32);
+  }
+
+  static long initViewHandle(DType type, int numRows, int nullCount,
+                             BaseDeviceMemoryBuffer dataBuffer,
+                             BaseDeviceMemoryBuffer validityBuffer,
+                             BaseDeviceMemoryBuffer offsetBuffer, long[] childHandles,
+                             DType offsetsType) {
+    if (!DType.INT32.equals(offsetsType) && !DType.INT64.equals(offsetsType)) {
+      throw new IllegalArgumentException("Offsets type must be INT32 or INT64");
+    }
+    if (DType.INT64.equals(offsetsType) && !DType.STRING.equals(type)) {
+      throw new IllegalArgumentException("INT64 offsets are only supported for STRING");
+    }
+    if (DType.INT64.equals(offsetsType)) {
+      if (numRows < 0 || numRows == Integer.MAX_VALUE) {
+        throw new IllegalArgumentException("String column size exceeds the offsets row-count limit");
+      }
+      if (numRows > 0 && (offsetBuffer == null ||
+          offsetBuffer.getLength() < Math.multiplyExact(numRows + 1L, 8))) {
+        throw new IllegalArgumentException("String offsets buffer is too short for INT64 offsets");
+      }
+    }
     long cd = dataBuffer == null ? 0 : dataBuffer.address;
     long cdSize = dataBuffer == null ? 0 : dataBuffer.length;
     long od = offsetBuffer == null ? 0 : offsetBuffer.address;
     long vd = validityBuffer == null ? 0 : validityBuffer.address;
+    if (DType.INT64.equals(offsetsType)) {
+      return makeCudfStringColumnView(cd, cdSize, od, vd, nullCount, numRows,
+          offsetsType.getTypeId().getNativeId());
+    }
     return makeCudfColumnView(type.typeId.getNativeId(), type.getScale(), cd, cdSize,
         od, vd, nullCount, numRows, childHandles);
   }

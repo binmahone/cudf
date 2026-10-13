@@ -212,17 +212,4 @@ class HostStringOffsetsTest {
     }
   }
 
-  @Test void wideUploadRejectsBeforeLoadingNativeLibraries() {
-    try (HostColumnVector host = strings(true, "abc")) {
-      assertThrows(UnsupportedOperationException.class, host::copyToDevice);
-      assertEquals("abc", host.getJavaString(0));
-    }
-  }
-
-  @Test void nestedWideUploadRejectsBeforeLoadingNativeLibraries() {
-    try (HostColumnVector parent = list(strings(true, "abc"))) {
-      assertThrows(UnsupportedOperationException.class, parent::copyToDevice);
-      assertEquals(Collections.singletonList("abc"), parent.getList(0));
-    }
-  }
 }

@@ -266,7 +266,6 @@ public final class HostColumnVector extends HostColumnVectorCore {
    * Copy the data to the device.
    */
   public ColumnVector copyToDevice() {
-    require32BitOffsets("Host-to-device copy");
     if (rows == 0) {
       if (type.isNestedType()) {
         return ColumnView.NestedColumnVector.createColumnVector(type, 0,
@@ -305,12 +304,13 @@ public final class HostColumnVector extends HostColumnVectorCore {
 
         HostMemoryBuffer hoff = this.offHeap.offsets;
         if (hoff != null) {
-          long offsetsLen = OFFSET_SIZE * (rows + 1);
+          long offsetsLen = Math.multiplyExact(rows + 1, getOffsetsType().getSizeInBytes());
           offsets = DeviceMemoryBuffer.allocate(offsetsLen);
           offsets.copyFromHostBuffer(hoff, 0, offsetsLen);
         }
 
-        ColumnVector ret = new ColumnVector(type, rows, nullCount, data, valid, offsets);
+        ColumnVector ret = new ColumnVector(type, rows, nullCount, data, valid, offsets,
+            getOffsetsType());
         data = null;
         valid = null;
         offsets = null;

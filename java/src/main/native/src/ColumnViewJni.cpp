@@ -73,6 +73,7 @@
 #include <jni.h>
 
 #include <array>
+#include <limits>
 #include <numeric>
 #include <utility>
 
@@ -2520,6 +2521,71 @@ JNIEXPORT jlong JNICALL Java_ai_rapids_cudf_ColumnView_getListOffsetCvPointer(JN
   JNI_CATCH(env, 0);
 }
 
+JNIEXPORT jlong JNICALL Java_ai_rapids_cudf_ColumnView_makeCudfStringColumnView(
+  JNIEnv* env,
+  jclass,
+  jlong j_data,
+  jlong,
+  jlong j_offsets,
+  jlong j_valid,
+  jint j_null_count,
+  jint size,
+  jint j_offsets_type)
+{
+  JNI_TRY
+  {
+    cudf::jni::auto_set_device(env);
+    auto const offsets_type = static_cast<cudf::type_id>(j_offsets_type);
+    JNI_ARG_CHECK(env,
+                  offsets_type == cudf::type_id::INT32 || offsets_type == cudf::type_id::INT64,
+                  "String offsets must be INT32 or INT64",
+                  0);
+    JNI_ARG_CHECK(env, size >= 0 && size < std::numeric_limits<cudf::size_type>::max(),
+                  "String column size exceeds the offsets row-count limit", 0);
+    if (size == 0) {
+      return ptr_as_jlong(
+        new cudf::column_view(cudf::data_type{cudf::type_id::STRING}, 0, nullptr, nullptr, 0));
+    }
+    JNI_NULL_CHECK(env, j_offsets, "String offsets are null", 0);
+    auto const* valid = reinterpret_cast<cudf::bitmask_type const*>(j_valid);
+    if (valid == nullptr) {
+      j_null_count = 0;
+    } else if (j_null_count < 0) {
+      j_null_count = cudf::null_count(valid, 0, size);
+    }
+    cudf::column_view offsets_column(cudf::data_type{offsets_type},
+                                     size + 1,
+                                     reinterpret_cast<void const*>(j_offsets),
+                                     nullptr,
+                                     0);
+    return ptr_as_jlong(new cudf::column_view(cudf::data_type{cudf::type_id::STRING},
+                                             size,
+                                             reinterpret_cast<void const*>(j_data),
+                                             valid,
+                                             j_null_count,
+                                             0,
+                                             {offsets_column}));
+  }
+  JNI_CATCH(env, 0);
+}
+
+JNIEXPORT jint JNICALL Java_ai_rapids_cudf_ColumnView_getNativeOffsetsType(JNIEnv* env,
+                                                                        jclass,
+                                                                        jlong handle)
+{
+  JNI_NULL_CHECK(env, handle, "native handle is null", 0);
+  JNI_TRY
+  {
+    cudf::jni::auto_set_device(env);
+    auto const& column = *reinterpret_cast<cudf::column_view const*>(handle);
+    JNI_ARG_CHECK(env, column.type().id() == cudf::type_id::STRING,
+                  "Offsets type query requires STRING", 0);
+    if (column.size() == 0) { return static_cast<jint>(cudf::type_id::INT32); }
+    return static_cast<jint>(cudf::strings_column_view(column).offsets().type().id());
+  }
+  JNI_CATCH(env, 0);
+}
+
 JNIEXPORT jlong JNICALL Java_ai_rapids_cudf_ColumnView_getNativeOffsetsAddress(JNIEnv* env,
                                                                                jclass,
                                                                                jlong handle)
@@ -2562,13 +2628,13 @@ JNIEXPORT jlong JNICALL Java_ai_rapids_cudf_ColumnView_getNativeOffsetsLength(JN
       if (column->size() > 0) {
         cudf::strings_column_view view = cudf::strings_column_view(*column);
         cudf::column_view offsets_view = view.offsets();
-        result                         = sizeof(int) * offsets_view.size();
+        result = static_cast<jlong>(cudf::size_of(offsets_view.type())) * offsets_view.size();
       }
     } else if (column->type().id() == cudf::type_id::LIST) {
       if (column->size() > 0) {
         cudf::lists_column_view view   = cudf::lists_column_view(*column);
         cudf::column_view offsets_view = view.offsets();
-        result                         = sizeof(int) * offsets_view.size();
+        result = static_cast<jlong>(cudf::size_of(offsets_view.type())) * offsets_view.size();
       }
     }
     return result;
