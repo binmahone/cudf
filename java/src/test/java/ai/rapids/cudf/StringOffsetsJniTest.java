@@ -168,6 +168,43 @@ class StringOffsetsJniTest {
     }
   }
 
+  @Test void nativeConcatenateAcceptsMixedInputWidths() {
+    try (HostColumnVector a = HostStringOffsetsTest.strings(false, "abc");
+         HostColumnVector b = HostStringOffsetsTest.strings(true, "DE");
+         ColumnVector narrow = a.copyToDevice();
+         ColumnVector wide = b.copyToDevice();
+         ColumnVector combined = ColumnVector.concatenate(narrow, wide);
+         HostColumnVector result = combined.copyToHost()) {
+      assertEquals(DType.INT32, narrow.getOffsetsType());
+      assertEquals(DType.INT64, wide.getOffsetsType());
+      assertStrings(result, "abc", "DE");
+    }
+  }
+
+  @Test void nativeJoinAcceptsMixedInputWidths() {
+    try (HostColumnVector a = HostStringOffsetsTest.strings(false, "a", "b", "a");
+         HostColumnVector b = HostStringOffsetsTest.strings(true, "b", "a", "c");
+         ColumnVector narrow = a.copyToDevice();
+         ColumnVector wide = b.copyToDevice();
+         Table left = new Table(narrow);
+         Table right = new Table(wide)) {
+      GatherMap[] maps = left.innerJoinGatherMaps(right, false);
+      try {
+        assertEquals(3, maps[0].getRowCount());
+        try (ColumnView indices = maps[0].toColumnView(0, 3);
+             Table joined = left.gather(indices);
+             HostColumnVector result = joined.getColumn(0).copyToHost()) {
+          String[] values = new String[3];
+          for (int row = 0; row < 3; row++) values[row] = result.getJavaString(row);
+          Arrays.sort(values);
+          assertArrayEquals(new String[]{"a", "a", "b"}, values);
+        }
+      } finally {
+        for (GatherMap map : maps) map.close();
+      }
+    }
+  }
+
   @Test void nativeConcatenateSelectsWidthFromTotalBytes() {
     String value = "abcdefghijklmnopqrstuvwx";
     try (HostColumnVector host = HostStringOffsetsTest.strings(false, value);
