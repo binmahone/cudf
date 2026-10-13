@@ -53,6 +53,27 @@ class StringOffsetsJniTest {
   }
 
   @Test void legacyInt32RoundTrip() { roundTrip(false, "abc", null, "", "DE"); }
+
+  @Test void packedTableCloseFailureDoesNotRetainFreedBuffer() {
+    try (ColumnVector strings = ColumnVector.fromStrings("abc", "def");
+         Table table = new Table(strings)) {
+      ContiguousTable packed = table.contiguousSplit()[0];
+      DeviceMemoryBuffer buffer = packed.getBuffer();
+      buffer.setEventHandler(refCount -> {
+        throw new IllegalStateException("injected close callback failure");
+      });
+      try {
+        IllegalStateException error = assertThrows(IllegalStateException.class, packed::close);
+        assertEquals("injected close callback failure", error.getMessage());
+        assertEquals(0, buffer.getRefCount());
+        buffer.setEventHandler(null);
+        assertDoesNotThrow(packed::close);
+      } finally {
+        buffer.setEventHandler(null);
+        if (buffer.getRefCount() > 0) packed.close();
+      }
+    }
+  }
   @Test void explicitInt64RoundTrip() { roundTrip(true, "abc", null, "", "DE"); }
   @Test void explicitInt64Utf8RoundTrip() { roundTrip(true, "\u4f60\u597d", "\u00e9", ""); }
   @Test void explicitInt64AllNullRoundTrip() { roundTrip(true, null, null); }

@@ -99,8 +99,9 @@ public final class ContiguousTable implements AutoCloseable {
     }
 
     if (buffer != null) {
-      buffer.close();
+      DeviceMemoryBuffer bufferToClose = buffer;
       buffer = null;
+      bufferToClose.close();
     }
   }
 
